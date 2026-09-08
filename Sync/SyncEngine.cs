@@ -1,14 +1,15 @@
 ﻿using CSiAPIv1;
+using Eto;
 using Rhino;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using RhinoToSAP.Display;
+using RhinoToSAP.MappingFile;
 using RhinoToSAP.Tools;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Eto;
-using RhinoToSAP.Display;
 
 namespace RhinoToSAP.Sync
 {
@@ -126,23 +127,29 @@ namespace RhinoToSAP.Sync
         }
 
         //全量同步
-        public static void FullSync()
+        public static string FullSync()
         {
-            if (!SAPConnector.IsConnected|| (string.IsNullOrEmpty(SAPConnector.RootLayerName)   )) return;
-            if (!IsMappingLoaded)
+            if (!CheckReady(out string errorMsg))
             {
-                RhinoApp.WriteLine("[FullSync] 映射文件未加载，请先加载或新建映射文件");
-                return;
+                return errorMsg;
+            }
+
+            if (string.IsNullOrEmpty(SAPConnector.RootLayerName))
+            {
+                return "未设置根图层";
             }
             RhinoDoc doc = RhinoDoc.ActiveDoc;
-            if (doc == null) return;
+            if (doc == null) return "没有打开的Rhino文档";
             
             //初始化前清空状态，避免旧的映射关系干扰
             SyncStateManager.ClearState();
-            
+            if (!ClearAllSapObjects(out string Msg))
+            {
+                return Msg;
+            }   
+
             //递归获取根图层下的所有子图层
             Layer rootlayer = doc.Layers.FindName(SAPConnector.RootLayerName);
-            if (rootlayer == null) return; 
             List<Layer> layers = new List<Layer>();
             LayerHelper.GetAllChildLayers(rootlayer, layers);
 
@@ -160,19 +167,20 @@ namespace RhinoToSAP.Sync
             RhinoApp.WriteLine($"[FullSync] 找到图层数量：{layers.Count}，待处理变化数量：{pendingChanges.Count}");
             // 遍历完所有图层后，立刻执行处理
             ProcessPendingChanges();
+            MappingFileManager.Save();
+            return ($"全量同步完成：{MappingFileManager.report}");
         }
 
         //手动同步：立即处理所有待处理列表，不等待计时器触发
-        public static void ManualSync()
+        public static string ManualSync()
         {
-            if (!IsMappingLoaded)
+            if (!CheckReady(out string errorMsg))
             {
-                RhinoApp.WriteLine("[ManualSync]映射文件未加载，请先加载或新建映射文件");
-                return;
+                return errorMsg;
             }
-            if (!isInitialized) return;
             ProcessPendingChanges();//立即处理全部待处理列表
             _syncCounter = 0;//手动同步后归零
+            return "手动增量同步完成";
         }
 
 
@@ -275,9 +283,82 @@ namespace RhinoToSAP.Sync
             }
         }
 
+        // 内部统一校验：连接、映射文件、初始化都就绪才返回true
+        private static bool CheckReady(out string errorMsg)
+        {
+            if (!SAPConnector.IsConnected)
+            {
+                errorMsg = "请先连接SAP";
+                return false;
+            }
+            if (!IsMappingLoaded)
+            {
+                errorMsg = "请先加载或新建映射文件";
+                return false;
+            }
+            if (!isInitialized)
+            {
+                errorMsg = "同步引擎未初始化";
+                return false;
+            }
+            errorMsg = string.Empty;
+            return true;
+        }
 
 
+        // 设置高亮显示开关
+        public static string SetHighlightEnabled(bool enabled)
+        {
+            if (_highlightConduit != null) { _highlightConduit.Enabled = enabled; }
+            return $"高亮显示：{(enabled ? "开启" : "关闭")}";
+        }
+        // 设置高亮线宽
+        public static string SetHighlightWidth(string widthText)
+        {
+            // 1. 解析成int
+            int width;
+            if (!int.TryParse(widthText, out width))
+            {
+                return "高亮线宽输入无效，请输入1~20之间的整数";
+            }
 
+            // 2. 范围校验
+            if (width < 1 || width > 20)
+            {
+                return $"高亮线宽需在1~20像素之间，当前输入：{width}";
+            }
+
+            // 3. 校验通过，设置线宽
+            if (_highlightConduit != null)
+            {
+                _highlightConduit.HighlightWidth = width;
+            }
+
+            return $"高亮线宽：{width}像素";
+        }
+
+        // 删除SAP里所有单元和节点（全量同步前调用）
+        private static bool ClearAllSapObjects(out string Msg)
+        {
+            try
+            {
+                // 1. 全选模型中所有对象
+                SAPConnector.SapModel.SelectObj.All(false);
+
+                // 2. 删除
+                SAPConnector.SapModel.FrameObj.Delete("ignore", eItemType.Objects);
+                SAPConnector.SapModel.AreaObj.Delete("ignore", eItemType.Objects);     
+                SAPConnector.SapModel.LinkObj.Delete("ignore", eItemType.Objects);     
+                SAPConnector.SapModel.PointObj.DeleteSpecialPoint("ignore", eItemType.Objects);
+                Msg = "已清空SAP中所有单元和节点";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Msg = $"清空SAP对象失败{ex.Message}";
+                return false;
+            }
+        }
     }
 }
 

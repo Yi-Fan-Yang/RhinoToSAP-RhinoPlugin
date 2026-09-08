@@ -3,7 +3,9 @@ using Eto.Forms;
 using Rhino;
 using Rhino.UI;  
 using Rhino.UI.Controls;
+using RhinoToSAP.MappingFile;
 using RhinoToSAP.Sync;
+using RhinoToSAP.Tools;
 using System;
 using System.Runtime.InteropServices;
 
@@ -269,8 +271,180 @@ namespace RhinoToSAP.UI
 
         private void BindEvents()
         {
-            // 图层下拉列表
+            // ========== 连接区 ==========
+            // 图层锁定复选框：勾选时禁用下拉列表，取消勾选时启用
+            _layerLockCheckBox.CheckedChanged += (sender, e) =>
+            {
+                _layerDropDown.Enabled = !_layerLockCheckBox.Checked.Value;
+            };
+
+            // 连接按钮点击事件
+            _connectButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    string layerName = _layerDropDown.SelectedKey?.ToString() ?? "";
+                    string result = SAPConnector.Connect(layerName, _intervalTextBox.Text);
+                    AddLog(result);
+                    UpdateConnectionStatus();
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"连接异常：{ex.Message}");
+                }
+            };
+
+            //断开按钮事件
+            _disconnectButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    SAPConnector.Disconnect();
+                    AddLog("已断开连接");
+                    UpdateConnectionStatus();
+                    UpdateMappingStatus();
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"断开失败：{ex.Message}");
+                }
+            };
+
+            // ========== 映射文件区 ==========
+
+            // 加载按钮
+            _loadMappingButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    if (!SAPConnector.IsConnected)
+                    {
+                        AddLog("请先连接SAP，再加载映射文件");
+                        return;
+                    }
+                    MappingFileManager.LoadWithDialog();
+                    AddLog(MappingFileManager.report);
+                    UpdateMappingStatus();
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"加载映射文件异常：{ex.Message}");
+                }
+            };
+
+            // 新建按钮
+            _newMappingButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    if (!SAPConnector.IsConnected)
+                    {
+                        AddLog("请先连接SAP，再新建映射文件");
+                        return;
+                    }
+                    MappingFileManager.NewWithDialog();
+                    AddLog(MappingFileManager.report);
+                    UpdateMappingStatus();
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"新建映射文件异常：{ex.Message}");
+                }
+            };
+
+            // 保存按钮
+            _saveMappingButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    MappingFileManager.Save();
+                    AddLog(MappingFileManager.report);
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"保存映射文件异常：{ex.Message}");
+                }
+            };
+
+            // 另存为按钮
+            _saveAsMappingButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    MappingFileManager.SaveAsWithDialog();
+                    AddLog(MappingFileManager.report);
+                    UpdateMappingStatus();
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"另存为映射文件异常：{ex.Message}");
+                }
+            };
+
+            // ========== 同步操作区 ==========
+
+            // 增量同步按钮
+            _manualSyncButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    SyncEngine.ManualSync();
+                    // 更新同步次数显示
+                    _syncCountLabel.Text = $"已同步：{SyncEngine.SyncCount} 次";
+                    AddLog("手动增量同步完成");
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"增量同步异常：{ex.Message}");
+                }
+            };
+
+            // 全量同步按钮
+            _fullSyncButton.Click += (sender, e) =>
+            {
+                try
+                {
+                    // 弹窗确认
+                    var confirm = Rhino.UI.Dialogs.ShowMessage(
+                                "全量同步会清空当前映射表,并删除SAP2000中全部对象，确定要执行吗？",
+                                "全量同步确认",
+                                Rhino.UI.ShowMessageButton.YesNo,
+                                Rhino.UI.ShowMessageIcon.Warning);
+                    if(confirm==Rhino.UI.ShowMessageResult.No)
+                    {
+                        AddLog("已取消全量同步");
+                        return;
+                    }
+                    string result = SyncEngine.FullSync();
+                    AddLog(result);                    
+                    // 更新同步次数显示
+                    _syncCountLabel.Text = $"已同步：{SyncEngine.SyncCount} 次";
+                    AddLog("全量同步完成");
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"全量同步异常：{ex.Message}");
+                }
+            };
+
+            // ========== 显示设置区 ==========
+
+            // 高亮开关
+            _highlightCheckBox.CheckedChanged += (sender, e) =>
+            {
+                string result = SyncEngine.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
+                AddLog(result);
+            };
+
+            // 高亮线宽
+            _highlightWidthTextBox.TextChanged += (sender, e) =>
+            {
+                string result = SyncEngine.SetHighlightWidth(_highlightWidthTextBox.Text);
+                AddLog(result);
+            };
+
         }
+            
 
         // 刷新图层下拉列表
         private void RefreshLayerList()
@@ -329,8 +503,8 @@ namespace RhinoToSAP.UI
                 _mappingStatusLabel.BackgroundColor = Colors.Red;
             }
         }
-        
 
+        // 检查连接和映射文件是否都就绪，就绪返回true，否则显示日志并返回false
 
 
     }

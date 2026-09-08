@@ -38,52 +38,82 @@ namespace RhinoToSAP
 
 
         //==================方法=====================
-        // 尝试连接到正在运行的SAP2000实例
-        public static bool Connect(out string message)
+        // 连接SAP：内部做所有校验、连接、单位校验、初始化，返回结果信息
+        public static string Connect(string layerName, string intervalText)
         {
+            // ========== 1. 校验 ==========
+            // 图层名校验
+            if (string.IsNullOrEmpty(layerName))
+            {
+                return "请先选择图层";
+            }
+
+            // 同步间隔解析和校验
+            int intervalSeconds;
+            if (!int.TryParse(intervalText, out intervalSeconds))
+            {
+                return "同步间隔输入无效，请输入1~30之间的整数";
+            }
+            if (intervalSeconds < 1 || intervalSeconds > 30)
+            {
+                return $"同步间隔必须在1~30秒之间，当前输入：{intervalSeconds}秒";
+            }
+
+            // ========== 2. 设置参数 ==========
+            RootLayerName = layerName;
+            SyncEngine.SyncInterval = intervalSeconds * 1000;
+
+            // ========== 3. 连接SAP ==========
             try
             {
-                // 已经连接过就直接返回
-                if (IsConnected)
-                {
-                    message = "✅ 已连接到SAP2000实例";
-                    return true;
-                }
-
-                // 附加到正在运行的SAP实例（新版ProgID）
                 _sapApp = (cOAPI)Marshal.GetActiveObject("CSI.SAP2000.API.SapObject");
                 if (_sapApp == null)
                 {
-                    message = "❌ 未找到正在运行的SAP2000实例，请先打开SAP2000并新建空白模型";
-                    return false;
+                    return "未找到正在运行的SAP2000实例，请先打开SAP2000并新建空白模型";
                 }
-
-                // 新版API：SapModel是属性，不是GetSapModel()方法
                 _sapModel = _sapApp.SapModel;
                 if (_sapModel == null)
                 {
-                    message = "❌ SAP实例已找到，但获取SapModel失败";
-                    return false;
+                    return "SAP实例已找到，但获取SapModel失败";
                 }
                 _connectStartTime = DateTime.Now;
                 LastSapModelName = _sapModel.GetModelFilename(true);
-                message = "✅ 成功连接到SAP2000实例";
-                return true;
             }
             catch (COMException ex)
             {
-                message = $"❌ COM连接异常：{ex.Message}（请确认Rhino和SAP都以管理员身份运行）";
                 _sapApp = null;
                 _sapModel = null;
-                return false;
+                return $"COM连接异常：{ex.Message}（请确认Rhino和SAP都以管理员身份运行）";
             }
             catch (Exception ex)
             {
-                message = $"❌ 连接异常：{ex.Message}";
                 _sapApp = null;
                 _sapModel = null;
-                return false;
+                return $"连接异常：{ex.Message}";
             }
+
+            // ========== 4. 单位校验 ==========
+            RhinoDoc doc = RhinoDoc.ActiveDoc;
+            if (doc != null)
+            {
+                string unitMsg;
+                if (CheckUnits(doc, out unitMsg))
+                {
+                    // 单位一致，解锁图层
+                    LayerHelper.UnLockLayer(doc, layerName);
+                }
+                else
+                {
+                    // 单位不一致，锁定图层
+                    LayerHelper.LockLayer(doc, layerName);
+                }
+            }
+
+            // ========== 5. 初始化同步引擎 ==========
+            SyncEngine.Initialize();
+            SyncEngine.UpdateTimerState();
+
+            return "连接成功，同步引擎已初始化";
         }
 
         //检查Rhino和SAP的单位是否一致
