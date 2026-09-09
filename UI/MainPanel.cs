@@ -35,7 +35,7 @@ namespace RhinoToSAP.UI
         // ========== 同步操作区 ==========
         private Button _manualSyncButton;     // 手动增量同步按钮
         private Button _fullSyncButton;        // 全量同步按钮
-        private Label _syncCountLabel;         // 同步次数显示
+        private Label _timerStatusLabel;    // 计时器状态显示
 
         // ========== 显示设置区 ==========
         private CheckBox _highlightCheckBox;    // 高亮开关
@@ -58,8 +58,13 @@ namespace RhinoToSAP.UI
 
         public MainPanel(uint documentSerialNumber)
         {
-            this.Size = new Size(300, 1000);
+            this.Size = new Size(300, 1200);
             InitializeComponents();
+            SyncEngine.SecondPassed += () =>
+            {
+                TimeSpan d = SAPConnector.ConnectDuration;
+                _timerStatusLabel.Text = $"已连接 {d.Hours:D2}:{d.Minutes:D2}:{d.Seconds:D2} | 已同步 {SyncEngine.SyncCount} 次";
+            };
         }
 
         private void InitializeComponents()
@@ -90,12 +95,12 @@ namespace RhinoToSAP.UI
 
             // 连接按钮
             _connectButton = new Button();
-            _connectButton.Text = "连接";
+            _connectButton.Text = "启动SAP";
             _connectButton.Width = 100;
 
             // 断开按钮
             _disconnectButton = new Button();
-            _disconnectButton.Text = "断开";
+            _disconnectButton.Text = "关闭SAP";
             _disconnectButton.Enabled = false;  // 默认禁用，连接后才能断开
             _disconnectButton.Width = 100;
 
@@ -128,6 +133,11 @@ namespace RhinoToSAP.UI
             _mappingStatusLabel.Text = "状态：未加载映射文件";
             _mappingStatusLabel.BackgroundColor = Colors.Blue;
 
+            _timerStatusLabel = new Label();
+            _timerStatusLabel.Text = "已连接 00:00:00 | 已同步 0 次";
+            _timerStatusLabel.BackgroundColor = Colors.Gray;
+            _timerStatusLabel.Width = 250;
+
             // ========== 同步操作区控件 ==========
             _manualSyncButton = new Button();
             _manualSyncButton.Text = "增量同步";
@@ -137,8 +147,10 @@ namespace RhinoToSAP.UI
             _fullSyncButton.Text = "全量同步(慎点)";
             _fullSyncButton.Width = 100;
 
-            _syncCountLabel = new Label();
-            _syncCountLabel.Text = "已同步：0 次";
+            _timerStatusLabel = new Label();
+            _timerStatusLabel.Text = "已连接 00:00:00 | 已同步 0 次";
+            _timerStatusLabel.BackgroundColor = Colors.Gray;
+            _timerStatusLabel.Width = 250;
 
             // ========== 显示设置区控件 ==========
             _highlightCheckBox = new CheckBox();
@@ -239,7 +251,7 @@ namespace RhinoToSAP.UI
             syncButtonRow.Items.Add(_manualSyncButton);
             syncButtonRow.Items.Add(_fullSyncButton);
             mainLayout.Items.Add(syncButtonRow);
-            mainLayout.Items.Add(_syncCountLabel);
+            mainLayout.Items.Add(_timerStatusLabel);
 
             // 分隔线
             mainLayout.Items.Add(divider);
@@ -278,13 +290,20 @@ namespace RhinoToSAP.UI
                 _layerDropDown.Enabled = !_layerLockCheckBox.Checked.Value;
             };
 
+            //同步间隔输入事件
+            _intervalTextBox.TextChanged += (sender, e) =>
+            {
+                string result = SyncEngine.SetSyncInterval(_intervalTextBox.Text);
+                AddLog(result);
+            };
             // 连接按钮点击事件
             _connectButton.Click += (sender, e) =>
             {
                 try
                 {
                     string layerName = _layerDropDown.SelectedKey?.ToString() ?? "";
-                    string result = SAPConnector.Connect(layerName, _intervalTextBox.Text);
+                    string intervalText = _intervalTextBox.Text;
+                    string result = SAPConnector.Connect(layerName, intervalText);
                     AddLog(result);
                     UpdateConnectionStatus();
                 }
@@ -390,7 +409,6 @@ namespace RhinoToSAP.UI
                 {
                     SyncEngine.ManualSync();
                     // 更新同步次数显示
-                    _syncCountLabel.Text = $"已同步：{SyncEngine.SyncCount} 次";
                     AddLog("手动增量同步完成");
                 }
                 catch (Exception ex)
@@ -418,7 +436,6 @@ namespace RhinoToSAP.UI
                     string result = SyncEngine.FullSync();
                     AddLog(result);                    
                     // 更新同步次数显示
-                    _syncCountLabel.Text = $"已同步：{SyncEngine.SyncCount} 次";
                     AddLog("全量同步完成");
                 }
                 catch (Exception ex)
@@ -504,7 +521,6 @@ namespace RhinoToSAP.UI
             }
         }
 
-        // 检查连接和映射文件是否都就绪，就绪返回true，否则显示日志并返回false
 
 
     }

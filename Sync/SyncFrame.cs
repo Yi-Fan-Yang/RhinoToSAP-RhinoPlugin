@@ -19,7 +19,7 @@ namespace RhinoToSAP.Sync
 
 
         //FrameSection定义
-        public static string FrameSection { get; set; } = string.Empty;
+        public static string FrameSection { get; set; } = "None";
 
         // 新增杆件：在SAP创建杆件，记录映射和历史状态
         public static void AddFrame(LineState state)

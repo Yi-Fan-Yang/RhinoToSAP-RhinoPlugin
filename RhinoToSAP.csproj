@@ -33,7 +33,11 @@
     <Reference Include="Eto">
       <HintPath>..\..\..\..\..\Program Files\Rhino 7\System\Eto.dll</HintPath>
     </Reference>
+    <Reference Include="RhinoCommon">
+      <HintPath>..\..\..\..\..\Program Files\Rhino 7\System\RhinoCommon.dll</HintPath>
+    </Reference>
     <Reference Include="System.Web.Extensions" />
+	<Reference Include="System.Windows.Forms" />
   </ItemGroup>
   
   <Target Name="CopyPdbForMonoDebugging" AfterTargets="AfterBuild">

@@ -10,7 +10,7 @@ using System.Linq.Expressions;
 namespace RhinoToSAP
 {
     /// <summary>
-    /// SAP连接单例，整个插件共用一个SAP实例，避免重复Attach
+    // SAP连接单例，整个插件共用一个SAP实例，避免重复Attach
     /// </summary>
     public static class SAPConnector
     {
@@ -35,6 +35,10 @@ namespace RhinoToSAP
         private static bool _isDisconnecting = false;
         // 记录最后一次连接的SAP模型名称（SAP关闭后保存映射文件时用）
         public static string LastSapModelName = string.Empty;
+        // 配置文件路径：AppData\Roaming\RhinoToSAP\config.txt
+        private static readonly string ConfigFilePath = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "RhinoToSAP", "config.txt");
 
 
         //==================方法=====================
@@ -49,67 +53,68 @@ namespace RhinoToSAP
             }
 
             // 同步间隔解析和校验
-            int intervalSeconds;
-            if (!int.TryParse(intervalText, out intervalSeconds))
+            if (string.IsNullOrEmpty(intervalText))
             {
-                return "同步间隔输入无效，请输入1~30之间的整数";
-            }
-            if (intervalSeconds < 1 || intervalSeconds > 30)
-            {
-                return $"同步间隔必须在1~30秒之间，当前输入：{intervalSeconds}秒";
+                return "请设置同步间隔";
             }
 
             // ========== 2. 设置参数 ==========
             RootLayerName = layerName;
-            SyncEngine.SyncInterval = intervalSeconds * 1000;
+            SyncEngine.SyncInterval = int.TryParse(intervalText, out int interval) ? interval * 1000 : 3000;
 
-            // ========== 3. 连接SAP ==========
+            // ========== 3. 获取Rhino单位 ==========
+            RhinoDoc doc = RhinoDoc.ActiveDoc;
+            if (doc == null)
+            {
+                return "没有打开的Rhino文档";
+            }
+            eUnits sapUnit = RhinoUnitToSapUnit(doc.ModelUnitSystem);
+
+            // ========== 4. 弹打开文件窗口 ==========
+            string sapFileName = OpenSapFileDialog();
+
+            // ========== 5. 创建并启动SAP ==========
             try
             {
-                _sapApp = (cOAPI)Marshal.GetActiveObject("CSI.SAP2000.API.SapObject");
+                // 5.1 获取SAP2000.exe路径（从配置读，没有就弹窗选）
+                string sapExePath = GetSapExePath();
+                if (string.IsNullOrEmpty(sapExePath))
+                {
+                    return "未选择SAP2000.exe，启动取消";
+                }
+
+                // 5.2 创建Helper对象，通过Helper从指定路径创建SapObject（不依赖COM注册）
+                cHelper helper = new Helper();
+                _sapApp = helper.CreateObject(sapExePath);
                 if (_sapApp == null)
                 {
-                    return "未找到正在运行的SAP2000实例，请先打开SAP2000并新建空白模型";
+                    return "创建SAP对象失败，请检查SAP2000.exe路径是否正确";
                 }
+                // 5.3 启动SAP应用：单位用Rhino当前单位，窗口可见，打开用户选的模型文件
+                int ret = _sapApp.ApplicationStart(sapUnit, true, sapFileName);
+                if (ret != 0)
+                {
+                    return $"启动SAP失败，错误码：{ret}";
+                }
+                // 5.4 获取SapModel
                 _sapModel = _sapApp.SapModel;
                 if (_sapModel == null)
                 {
-                    return "SAP实例已找到，但获取SapModel失败";
+                    return "SAP启动成功，但获取SapModel失败";
                 }
+                // 5.5 记录连接开始时间和模型名称
                 _connectStartTime = DateTime.Now;
                 LastSapModelName = _sapModel.GetModelFilename(true);
-            }
-            catch (COMException ex)
-            {
-                _sapApp = null;
-                _sapModel = null;
-                return $"COM连接异常：{ex.Message}（请确认Rhino和SAP都以管理员身份运行）";
             }
             catch (Exception ex)
             {
                 _sapApp = null;
                 _sapModel = null;
-                return $"连接异常：{ex.Message}";
+                return $"启动SAP异常：{ex.Message}";
             }
 
-            // ========== 4. 单位校验 ==========
-            RhinoDoc doc = RhinoDoc.ActiveDoc;
-            if (doc != null)
-            {
-                string unitMsg;
-                if (CheckUnits(doc, out unitMsg))
-                {
-                    // 单位一致，解锁图层
-                    LayerHelper.UnLockLayer(doc, layerName);
-                }
-                else
-                {
-                    // 单位不一致，锁定图层
-                    LayerHelper.LockLayer(doc, layerName);
-                }
-            }
 
-            // ========== 5. 初始化同步引擎 ==========
+            // ========== 6. 初始化同步引擎 ==========
             SyncEngine.Initialize();
             SyncEngine.UpdateTimerState();
 
@@ -124,32 +129,17 @@ namespace RhinoToSAP
                 UnitSystem rhinoUnit = doc.ModelUnitSystem;
                 eUnits sapUnit = _sapModel.GetPresentUnits();
 
-                eUnits expectedSapUnit;
-                switch (rhinoUnit)
-                {
-                    case UnitSystem.Millimeters:
-                        expectedSapUnit = eUnits.kN_mm_C;
-                        break;
-                    case UnitSystem.Centimeters:
-                        expectedSapUnit = eUnits.kN_cm_C;
-                        break;
-                    case UnitSystem.Meters:
-                        expectedSapUnit = eUnits.kN_m_C;
-                        break;
-                    default:
-                        message = $"❌ 连接成功，不支持的Rhino单位：{rhinoUnit}";
-                        return false;
-                }
+                eUnits expectedSapUnit = RhinoUnitToSapUnit(rhinoUnit);
                 if (expectedSapUnit == sapUnit)
                 {
                     // 单位一致
-                    message = $"✅ 连接成功，单位一致，当前单位：{rhinoUnit}";
+                    message = $"✅ 单位一致，当前单位：{rhinoUnit}";
                     return true;
                 }
                 else
                 {
                     // 单位不一致
-                    message = $"❌ 连接成功，单位不一致：Rhino单位是{rhinoUnit}，SAP单位是{sapUnit}，请统一单位";
+                    message = $"❌ 单位不一致：Rhino单位是{rhinoUnit}，SAP单位是{sapUnit}，请统一单位";
                     return false;
                 }
             }
@@ -210,15 +200,12 @@ namespace RhinoToSAP
                 // 清空绑定的图层名
                 RootLayerName = string.Empty;
 
-                // 清空SAP连接对象
-                if(_sapModel != null)
+                // 关闭SAP程序（true表示保存文件后关闭）
+                if (_sapApp != null)
                 {
-                    Marshal.FinalReleaseComObject( _sapModel );
+                    try { _sapApp.ApplicationExit(true); }
+                    catch { }
                     _sapModel = null;
-                }
-                if(_sapApp != null)
-                {
-                    Marshal.FinalReleaseComObject(_sapApp);
                     _sapApp = null;
                 }
                 LastSapModelName = string.Empty;
@@ -232,6 +219,93 @@ namespace RhinoToSAP
             {
                 _isDisconnecting = false;  // 无论成功失败都重置
             }
+        }
+
+        // Rhino单位转SAP单位枚举
+        private static eUnits RhinoUnitToSapUnit(UnitSystem rhinoUnit)
+        {
+            switch (rhinoUnit)
+            {
+                case UnitSystem.Millimeters:
+                    return eUnits.kN_mm_C;
+                case UnitSystem.Centimeters:
+                    return eUnits.kN_cm_C;
+                case UnitSystem.Meters:
+                    return eUnits.kN_m_C;
+                default:
+                    return eUnits.kN_mm_C;  // 默认毫米
+            }
+        }
+
+        // 弹打开文件窗口，让用户选择SAP模型文件，取消返回空字符串
+        private static string OpenSapFileDialog()
+        {
+            var openDlg = new Eto.Forms.OpenFileDialog();
+            openDlg.Filters.Add(new Eto.Forms.FileFilter("SAP模型文件", ".sdb"));
+            openDlg.Filters.Add(new Eto.Forms.FileFilter("所有文件", ".*"));
+            openDlg.Title = "打开SAP模型文件";
+
+            if (openDlg.ShowDialog(Eto.Forms.Application.Instance.MainForm) != Eto.Forms.DialogResult.Ok)
+            {
+                return string.Empty;
+            }
+
+            return openDlg.FileName;
+        }
+
+        // 从配置文件读取SAP2000.exe的路径，没有或读取失败返回空字符串
+        private static string LoadSapPath()
+        {
+            try
+            {
+                if(System.IO.File.Exists(ConfigFilePath))return string.Empty;
+                return System.IO.File.ReadAllText(ConfigFilePath).Trim();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        // 把SAP2000.exe的路径保存到配置文件
+        private static void SaveSapPath(string path)
+        {
+            try
+            {
+                string dir = System.IO.Path.GetDirectoryName(ConfigFilePath);
+                if (!System.IO.Directory.Exists(dir))
+                {
+                    System.IO.Directory.CreateDirectory(dir);
+                }
+                System.IO.File.WriteAllText(ConfigFilePath, path.Trim());
+            }
+            catch
+            {
+                // 吞掉异常，避免保存配置时出错
+            }
+        }
+        // 获取SAP2000.exe路径：先从配置读，没有或无效就弹窗选，选完保存
+        private static string GetSapExePath()
+        {
+            string path = LoadSapPath();
+            if (System.IO.File.Exists(path) && !string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            // 弹窗选择SAP2000.exe路径
+            var openDlg = new Eto.Forms.OpenFileDialog();
+            openDlg.Filters.Add(new Eto.Forms.FileFilter("SAP2000.exe", "SAP2000.exe"));
+            openDlg.Title = "选择SAP2000.exe路径";
+
+            if (openDlg.ShowDialog(Eto.Forms.Application.Instance.MainForm) != Eto.Forms.DialogResult.Ok)
+            {
+                return string.Empty;
+            }
+
+            path = openDlg.FileName;
+            SaveSapPath(path);
+            return path;
         }
     }
 }

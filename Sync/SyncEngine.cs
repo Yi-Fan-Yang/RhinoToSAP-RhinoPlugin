@@ -10,6 +10,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using WinFormsTimer = System.Windows.Forms.Timer;
+
 
 namespace RhinoToSAP.Sync
 {
@@ -17,8 +19,7 @@ namespace RhinoToSAP.Sync
     {
         // ========== 核心调度字段 ==========
         // 计时器
-        private static Eto.Forms.UITimer _Timer;
-
+        private static WinFormsTimer _Timer;
         // 增量同步计数器：数到目标值就执行一次同步，然后归零
         private static int _syncCounter = 0;
         // 连接检测计数器：数到5就检查一次SAP连接，然后归零
@@ -33,6 +34,9 @@ namespace RhinoToSAP.Sync
         
         //映射文件是否已加载成功（只有连接+映射都就绪，Timer才启动，同步才可用）
         public static bool IsMappingLoaded = false;
+        // 事件：每秒触发一次，供外部订阅
+        public static event Action SecondPassed;  
+
 
         // ========== 常量配置 ==========
         // 同步间隔，默认3000ms
@@ -43,7 +47,7 @@ namespace RhinoToSAP.Sync
             set
             {
                 if (value < 1000) value = 1000; // 最小1000ms
-                if(value > 60000) value = 60000; // 最大60000ms
+                if(value > 30000) value = 30000; // 最大30000ms
                 _syncInterval = value;
             }
         }
@@ -189,12 +193,14 @@ namespace RhinoToSAP.Sync
         public static void UpdateTimerState()
         {
             bool shouldRun = SAPConnector.IsConnected && IsMappingLoaded;
+            //RhinoApp.WriteLine($"[UpdateTimerState] shouldRun={shouldRun}, IsConnected={SAPConnector.IsConnected}, " +
+                //$"IsMappingLoaded={IsMappingLoaded}, _Timer==null={_Timer == null}");
             if (shouldRun && _Timer == null)
             {
                 // 初始化计时器
-                _Timer = new Eto.Forms.UITimer();
+                _Timer = new WinFormsTimer();
                 _Timer.Interval = 1000;
-                _Timer.Elapsed += OnTimerTick;
+                _Timer.Tick += OnTimerTick;
                 _Timer.Start();
                 RhinoApp.WriteLine("[SyncEngine] Timer已启动");
             }
@@ -212,6 +218,7 @@ namespace RhinoToSAP.Sync
         // 计时器Tick事件：批量处理所有待处理的变化
         public static void OnTimerTick(object sender, EventArgs e)
         {
+            RhinoApp.WriteLine($"[OnTimerTick] 第{_syncCounter}秒");
             // 两个计数器各自+1
             _syncCounter++;
             _connCheckCounter++;
@@ -242,6 +249,7 @@ namespace RhinoToSAP.Sync
                     RhinoApp.WriteLine($"[SyncEngine] 单位不匹配,，自动锁定图层");
                 }
                 _connCheckCounter = 0;// 重置计数器
+                SecondPassed?.Invoke();
             }
         }
 
@@ -359,6 +367,23 @@ namespace RhinoToSAP.Sync
                 return false;
             }
         }
+
+        //读取同步间隔方法
+        public static string SetSyncInterval(string intervalText)
+        {
+            int interval;
+            if (!int.TryParse(intervalText, out interval))
+            {
+                return "同步间隔输入无效，请输入1~30之间的整数";
+            } 
+            if (interval < 1 || interval > 30)
+            {
+                return "同步间隔需在1~30秒之间";
+            }
+            SyncInterval = interval * 1000;
+            return $"同步间隔：{interval}秒";
+        }
+
     }
 }
 
