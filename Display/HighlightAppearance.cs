@@ -22,7 +22,7 @@ namespace RhinoToSAP.Display
         protected override void PostDrawObjects(DrawEventArgs e)
         {
             // 1. 安全检查：映射文件未加载或未连接，不绘制高亮
-            if (!SyncEngine.IsMappingLoaded || !SAPConnector.IsConnected) return;
+            if (!SyncAuto.IsMappingLoaded || !SAPConnector.IsConnected) return;
 
             // 2. 遍历映射表中的所有Rhino对象ID
             foreach (var map in SyncStateManager.GetAllMappings())

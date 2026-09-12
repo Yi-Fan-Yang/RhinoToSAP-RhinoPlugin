@@ -34,8 +34,8 @@ namespace RhinoToSAP.UI
         private Label _mappingStatusLabel;       // 状态显示
 
         // ========== 同步操作区 ==========
-        private Button _manualSyncButton;     // 手动增量同步按钮
-        private Button _fullSyncButton;        // 全量同步按钮
+        private Button _RhinoToSapButton;     // 手动增量同步按钮
+        private Button _SapToRhinoButton;        // 全量同步按钮
         private Label _timerStatusLabel;    // 计时器状态显示
 
         // ========== 显示设置区 ==========
@@ -61,10 +61,10 @@ namespace RhinoToSAP.UI
         {
             this.Size = new Size(300, 1200);
             InitializeComponents();
-            SyncEngine.SecondPassed += () =>
+            SyncAuto.SecondPassed += () =>
             {
                 TimeSpan d = SAPConnector.ConnectDuration;
-                _timerStatusLabel.Text = $"已连接 {d.Hours:D2}:{d.Minutes:D2}:{d.Seconds:D2} | 已同步 {SyncEngine.SyncCount} 次";
+                _timerStatusLabel.Text = $"已连接 {d.Hours:D2}:{d.Minutes:D2}:{d.Seconds:D2} | 已同步 {SyncAuto.SyncCount} 次";
             };
         }
 
@@ -146,13 +146,15 @@ namespace RhinoToSAP.UI
             _timerStatusLabel.Width = 250;
 
             // ========== 同步操作区控件 ==========
-            _manualSyncButton = new Button();
-            _manualSyncButton.Text = "增量同步";
-            _manualSyncButton.Width = 100;
+            _RhinoToSapButton = new Button();
+            _RhinoToSapButton.Text = "RhinoToSap";
+            _RhinoToSapButton.Width = 100;
+            _RhinoToSapButton.Enabled = false;
 
-            _fullSyncButton = new Button();
-            _fullSyncButton.Text = "全量同步(慎点)";
-            _fullSyncButton.Width = 100;
+            _SapToRhinoButton = new Button();
+            _SapToRhinoButton.Text = "SapToRhino";
+            _SapToRhinoButton.Width = 100;
+            _SapToRhinoButton.Enabled= false;
 
             _timerStatusLabel = new Label();
             _timerStatusLabel.Text = "已连接 00:00:00 | 已同步 0 次";
@@ -256,8 +258,8 @@ namespace RhinoToSAP.UI
             StackLayout syncButtonRow = new StackLayout();
             syncButtonRow.Orientation = Orientation.Horizontal;
             syncButtonRow.Spacing = 5;
-            syncButtonRow.Items.Add(_manualSyncButton);
-            syncButtonRow.Items.Add(_fullSyncButton);
+            syncButtonRow.Items.Add(_RhinoToSapButton);
+            syncButtonRow.Items.Add(_SapToRhinoButton);
             mainLayout.Items.Add(syncButtonRow);
             mainLayout.Items.Add(_timerStatusLabel);
 
@@ -300,22 +302,28 @@ namespace RhinoToSAP.UI
             //同步间隔输入事件
             _intervalTextBox.TextChanged += (sender, e) =>
             {
-                string result = SyncEngine.SetSyncInterval(_intervalTextBox.Text);
+                string result = SyncAuto.SetSyncInterval(_intervalTextBox.Text);
                 AddLog(result);
             };
             // 自动同步开关
             _autoSyncCheckBox.CheckedChanged += (sender, e) =>
             {
-                string result = SyncEngine.SetAutoSyncEnabled(_autoSyncCheckBox.Checked.Value);
-                AddLog(result);
+                SyncAuto.isAutoSyncEnabled = _autoSyncCheckBox.Checked.Value;
+
+                // 自动同步开启时，两个手动同步按钮都禁用
+                bool manualEnabled = !_autoSyncCheckBox.Checked.Value;
+                _RhinoToSapButton.Enabled = manualEnabled;   // RhinoToSap
+                _SapToRhinoButton.Enabled = manualEnabled;      // SapToRhino
+
+                AddLog($"自动同步：{(_autoSyncCheckBox.Checked.Value ? "开启" : "关闭")}");
             };
             // 高亮开关
             _highlightCheckBox.CheckedChanged += (sender, e) =>
             {
-                string result = SyncEngine.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
+                string result = SyncDisplay.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
                 AddLog(result);
             };
-            // 连接按钮点击事件
+            // 连接按钮事件
             _connectButton.Click += (sender, e) =>
             {
                 try
@@ -421,13 +429,24 @@ namespace RhinoToSAP.UI
             // ========== 同步操作区 ==========
 
             // 增量同步按钮
-            _manualSyncButton.Click += (sender, e) =>
+            _RhinoToSapButton.Click += (sender, e) =>
             {
                 try
                 {
-                    SyncEngine.ManualSync();
-                    // 更新同步次数显示
-                    AddLog("手动增量同步完成");
+                    RhinoDoc doc = RhinoDoc.ActiveDoc;
+                    if (doc == null)
+                    {
+                        AddLog("没有打开的Rhino文档");
+                        return;
+                    }
+                    string rootLayerName = _layerDropDown.SelectedKey?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(rootLayerName))
+                    {
+                        AddLog("请先选择图层");
+                        return;
+                    }
+                    bool success = SyncRtoS.RhinoToSap(doc, rootLayerName, out string msg);
+                    AddLog(msg);
                 }
                 catch (Exception ex)
                 {
@@ -436,30 +455,9 @@ namespace RhinoToSAP.UI
             };
 
             // 全量同步按钮
-            _fullSyncButton.Click += (sender, e) =>
+            _SapToRhinoButton.Click += (sender, e) =>
             {
-                try
-                {
-                    // 弹窗确认
-                    var confirm = Rhino.UI.Dialogs.ShowMessage(
-                                "全量同步会清空当前映射表,并删除SAP2000中全部对象，确定要执行吗？",
-                                "全量同步确认",
-                                Rhino.UI.ShowMessageButton.YesNo,
-                                Rhino.UI.ShowMessageIcon.Warning);
-                    if(confirm==Rhino.UI.ShowMessageResult.No)
-                    {
-                        AddLog("已取消全量同步");
-                        return;
-                    }
-                    string result = SyncEngine.FullSync();
-                    AddLog(result);                    
-                    // 更新同步次数显示
-                    AddLog("全量同步完成");
-                }
-                catch (Exception ex)
-                {
-                    AddLog($"全量同步异常：{ex.Message}");
-                }
+                AddLog("SapToRhino功能待实现");
             };
 
             // ========== 显示设置区 ==========
@@ -467,14 +465,14 @@ namespace RhinoToSAP.UI
             // 高亮开关
             _highlightCheckBox.CheckedChanged += (sender, e) =>
             {
-                string result = SyncEngine.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
+                string result = SyncDisplay.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
                 AddLog(result);
             };
 
             // 高亮线宽
             _highlightWidthTextBox.TextChanged += (sender, e) =>
             {
-                string result = SyncEngine.SetHighlightWidth(_highlightWidthTextBox.Text);
+                string result = SyncDisplay.SetHighlightWidth(_highlightWidthTextBox.Text);
                 AddLog(result);
             };
 
@@ -525,7 +523,7 @@ namespace RhinoToSAP.UI
         // 更新映射文件状态显示
         private void UpdateMappingStatus()
         {
-            if (SyncEngine.IsMappingLoaded)
+            if (SyncAuto.IsMappingLoaded)
             {
                 _mappingPathLabel.Text = System.IO.Path.GetFileName(SyncPersistenceIO.CurrentMappingFilePath);
                 _mappingStatusLabel.Text = $"状态：已加载映射文件 ";

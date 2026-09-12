@@ -16,6 +16,9 @@ namespace RhinoToSAP.Sync
     {
         //FrameSection定义
         public static string FrameSection { get; set; } = "None";
+        // 手动同步是否正在运行（自动同步前检查，避免同时运行）
+        private static bool _isManualSyncRunning = false;
+        public static bool IsManualSyncRunning => _isManualSyncRunning;
         /// <summary>
         /// 直线待处理列表
         /// </summary>
@@ -49,20 +52,34 @@ namespace RhinoToSAP.Sync
         public static bool RhinoToSap(RhinoDoc doc, string rootLayerName, out string message)
         {
             message = string.Empty;
-            if (!SyncEngine.CheckReady(out string errorMsg))
+            if (!SyncAuto.CheckReady(out string errorMsg))
             {
                 message = errorMsg;
                 return false;
             }
+            if(SyncAuto.isAutoSyncEnabled)
+            {
+                message = "请先关闭自动同步";
+                return false;
+            }
+            if (_isManualSyncRunning)
+            {
+                message = "手动同步正在运行中，请稍候";
+                return false;
+            }
             try
             {
+                _isManualSyncRunning = true;  // 标记手动同步开始
                 CollectChanges(doc, rootLayerName);
-                return ExecuteChanges(out message);
+                if (ExecuteChanges(out message)) { _isManualSyncRunning = false; return true; }
+                else { _isManualSyncRunning = false; return false; }
+
             }
             catch (Exception ex)
             {
                 message = $"Rhino→SAP同步失败：{ex.Message}";
                 ClearAllChanges();
+                _isManualSyncRunning = false;
                 return false;
             }
         }

@@ -62,7 +62,7 @@ namespace RhinoToSAP
 
             // ========== 2. 设置参数 ==========
             RootLayerName = layerName;
-            SyncEngine.SyncInterval = int.TryParse(intervalText, out int interval) ? interval * 1000 : 3000;
+            SyncAuto.SyncInterval = int.TryParse(intervalText, out int interval) ? interval * 1000 : 3000;
 
             // ========== 3. 获取Rhino单位 ==========
             RhinoDoc doc = RhinoDoc.ActiveDoc;
@@ -117,8 +117,8 @@ namespace RhinoToSAP
 
 
             // ========== 6. 初始化同步引擎 ==========
-            SyncEngine.Initialize();
-            SyncEngine.UpdateTimerState();
+            SyncAuto.Initialize();
+            SyncAuto.UpdateTimerState();
 
             return "连接成功，同步引擎已初始化";
         }
@@ -177,7 +177,7 @@ namespace RhinoToSAP
             try
             {
                 //断开前询问保存映射表
-                if (SyncEngine.IsMappingLoaded)
+                if (SyncAuto.IsMappingLoaded)
                 {
                     var result = Rhino.UI.Dialogs.ShowMessage(
                                 "是否保存当前映射文件？", "保存映射文件",
@@ -190,7 +190,7 @@ namespace RhinoToSAP
                 }
 
                 // 先停止同步引擎，注销事件、释放所有计时器
-                SyncEngine.Shutdown();
+                SyncAuto.Shutdown();
 
                 // 锁定绑定的根图层（如果有活动文档和绑定图层）
                 RhinoDoc doc = RhinoDoc.ActiveDoc;

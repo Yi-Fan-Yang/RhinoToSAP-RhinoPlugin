@@ -24,15 +24,15 @@ namespace RhinoToSAP.MappingFile
         private static void Rollback()
         {
             SyncPersistenceIO.UnLoadMapping();
-            SyncEngine.IsMappingLoaded = false;
-            SyncEngine.UpdateTimerState();
+            SyncAuto.IsMappingLoaded = false;
+            SyncAuto.UpdateTimerState();
         }
 
         // 标记就绪：设置加载状态，启动Timer
         private static void MarkReady()
         {
-            SyncEngine.IsMappingLoaded = true;
-            SyncEngine.UpdateTimerState();
+            SyncAuto.IsMappingLoaded = true;
+            SyncAuto.UpdateTimerState();
         }
 
         // ========== 公共方法 ==========
@@ -59,16 +59,16 @@ namespace RhinoToSAP.MappingFile
 
                 if (!SyncPersistenceIO.CreateEmptyMapping(newPath))
                 {
-                    SyncEngine.IsMappingLoaded = false;
-                    SyncEngine.UpdateTimerState();
+                    SyncAuto.IsMappingLoaded = false;
+                    SyncAuto.UpdateTimerState();
                     report = "❌ 新建映射文件失败";
                     return;
                 }
 
                 // 新建后自动加载
                 SyncPersistenceIO.LoadMapping(newPath, out string errorMsg);
-                SyncEngine.IsMappingLoaded = true;
-                SyncEngine.UpdateTimerState();
+                SyncAuto.IsMappingLoaded = true;
+                SyncAuto.UpdateTimerState();
                 filePath = newPath;
                 isReady = true;
 
@@ -199,7 +199,7 @@ namespace RhinoToSAP.MappingFile
             _isProcessing = true;
             try
             {
-                if (!SyncEngine.IsMappingLoaded)
+                if (!SyncAuto.IsMappingLoaded)
                 {
                     report = "❌ 没有加载的映射文件，无法保存";
                     return;
@@ -224,7 +224,7 @@ namespace RhinoToSAP.MappingFile
             _isProcessing = true;
             try
             {
-                if (!SyncEngine.IsMappingLoaded)
+                if (!SyncAuto.IsMappingLoaded)
                 {
                     report = "❌ 没有加载的映射文件，无法另存为";
                     return;

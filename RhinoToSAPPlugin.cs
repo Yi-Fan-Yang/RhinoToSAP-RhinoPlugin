@@ -75,7 +75,7 @@ namespace RhinoToSAP
             try
             {
                 RhinoApp.Closing -= OnRhinoClosing;
-                SyncEngine.Shutdown();
+                SyncAuto.Shutdown();
             }
             catch{ }
             base.OnShutdown();
