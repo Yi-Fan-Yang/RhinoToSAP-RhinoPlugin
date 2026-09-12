@@ -16,16 +16,6 @@ namespace RhinoToSAP.MappingFile
     /// </summary>
     public static class MappingValidator
     {
-        // ========== 待处理列表容器 ==========
-        // 待创建：Rhino里有、映射里没有的新对象
-        public static List<LineState> PendingCreate = new List<LineState>();
-        // 待更新：映射里有、坐标变了的对象
-        public static List<LineState> PendingUpdate = new List<LineState>();
-        // 待删除：映射里有、Rhino里已经删除的对象ID
-        public static List<Guid> PendingDelete = new List<Guid>();
-        // 待图层变更：Rhino里有、映射里有、但图层变了的对象
-        public static List<LayerChangeInfo> PendingLayerChange = new List<LayerChangeInfo>();
-
 
         // ========== 公共方法：对外提供的校验入口 ==========
 
@@ -37,57 +27,27 @@ namespace RhinoToSAP.MappingFile
         public static bool Validate(out string errorMsg)
         {
             errorMsg = string.Empty;
-            //清空待处理列表
-            PendingCreate.Clear();
-            PendingUpdate.Clear();
-            PendingDelete.Clear();
-            PendingLayerChange.Clear();
 
-            //校验
-            if (!ValidateSapModelMatch(out string modelerror))
+            // 校验1：SAP模型匹配
+            if (!ValidateSapModelMatch(out string modelError))
             {
-                errorMsg = modelerror;
-                return false;
-            }
-            if (!ValidateDataIntegrity(out string dataerror))
-            {
-                errorMsg = dataerror;
+                errorMsg = modelError;
                 return false;
             }
 
-            //4. 增量对齐：收集Rhino侧的变化
-            CollectRhinoChanges();
-            CollectDeletedObjects();
+            // 校验2：数据完整性
+            if (!ValidateDataIntegrity(out string dataError))
+            {
+                errorMsg = dataError;
+                return false;
+            }
+
+            // 校验3：SAP映射有效性（清理无效映射）
             ValidateSapMappingAlive();
 
             return true;
         }
 
-        public static void ExecutePendingChanges()
-        {
-            // Frame单元
-            foreach (LineState state in PendingCreate)
-            {
-                SyncFrame.AddFrame(state);
-            }
-            foreach (LineState state in PendingUpdate)
-            {
-                SyncFrame.UpdateFrame(state);
-            }
-            foreach (Guid rhinoId in PendingDelete)
-            {
-                SyncFrame.DeleteFrame(rhinoId);
-            }
-            //Area单元
-            //图层变化
-            foreach (LayerChangeInfo change in PendingLayerChange)
-            {
-                if (SyncStateManager.TryGetMapping(change.RhinoId, out string sapId))
-                {
-                    SyncSapGeneral.UpdateSapObjectGroup(sapId, change.OldLayerFullPath, change.NewLayerFullPath);
-                }
-            }
-        }
 
         // ========== 私有辅助方法：校验 ==========
 
@@ -138,95 +98,6 @@ namespace RhinoToSAP.MappingFile
             return true;
         }
 
-
-        // ========== 校验3：增量对齐 ==========
-
-        /// <summary>
-        /// Rhino侧遍历：对比当前Rhino对象和历史状态，生成待创建/待更新列表
-        /// </summary>
-        private static void CollectRhinoChanges()
-        {
-            // 1.拿到当前Rhino文档，为空直接返回
-            RhinoDoc doc = RhinoDoc.ActiveDoc;
-            if (doc == null) return;
-
-            // 2. 找到目标根图层，找不到直接返回
-            Layer rootLayer = doc.Layers.FindName(SAPConnector.RootLayerName);
-            if (rootLayer == null) return;
-
-            // 3. 递归拿到根图层下的所有子图层（用已经写好的LayerHelper方法）
-            List<Layer> allLayers = new List<Layer>();
-            LayerHelper.GetAllChildLayers(rootLayer, allLayers);
-
-            // 4. 遍历所有图层里的所有对象
-            foreach (Layer i in allLayers)
-            {
-                RhinoObject[] objects = doc.Objects.FindByLayer(i);
-                if (objects == null) continue;
-
-                foreach (RhinoObject obj in objects)
-                {
-                    // 5. 过滤：只保留有效直线（用已经写好的LineHelper方法）
-                    if (!LineHelper.IsValidLineObject(obj)) continue;
-
-                    // 6. 把当前直线转成LineState状态快照
-                    LineState currentState = LineHelper.ToLineState(obj);
-
-                    // 7. 查内存里的历史状态，看这个对象之前有没有同步过
-                    if (!SyncStateManager.TryGetHistory<LineState>(currentState.RhinoLineId, out LineState oldState))
-                    {
-                        // 查不到：说明是新对象，加到待创建列表
-                        PendingCreate.Add(currentState);
-                        continue;
-                    }
-                    //8. 查到了：判断图层是否发生变化
-                    if (oldState.LayerName != currentState.LayerName)
-                    {
-                        // 图层变了：加到待图层变更列表
-                        PendingLayerChange.Add(new LayerChangeInfo
-                        (
-                            currentState.RhinoLineId,
-                            oldState.LayerName,
-                            currentState.LayerName
-                        ));
-                    }
-                    //9. 对比坐标有没有变化，用已经写好的对比方法
-                    if (!LineHelper.IsLineStateEqual(currentState, oldState))
-                    {
-                        // 坐标变了：加到待更新列表
-                        PendingUpdate.Add(currentState);
-                    }
-                    // 坐标没变：什么都不用做，跳过
-                }
-            }
-        }
-
-        /// <summary>
-        /// 删除检测：找出映射里有、Rhino里已经删除的对象，生成待删除列表
-        /// </summary>
-        private static void CollectDeletedObjects()
-        {
-            // 1. 拿到当前Rhino文档
-            RhinoDoc doc = RhinoDoc.ActiveDoc;
-            if (doc == null) return;
-
-            // 2. 记录要删除的ID列表，遍历过程中不能直接修改映射表
-            List<Guid> toDelete = new List<Guid>();
-
-            //3. 遍历所有映射：Key是Rhino对象ID，Value是SAP ID
-            foreach (LineState oldState in SyncStateManager.GetAllLineStates())
-            {
-                // 4. 检查Rhino里有没有这个对象
-                RhinoObject obj = doc.Objects.Find(oldState.RhinoLineId);
-                if (obj == null)
-                {
-                    // 5. Rhino里找不到：说明被删除了，加入待删除列表
-                    toDelete.Add(oldState.RhinoLineId);
-                }
-            }
-            //6. 把待删除列表加入全局待删除容器
-            PendingDelete.AddRange(toDelete);
-        }
 
         /// <summary>
         /// SAP侧有效性校验：检查映射里的SAP FrameID是否还存在，清理无效映射

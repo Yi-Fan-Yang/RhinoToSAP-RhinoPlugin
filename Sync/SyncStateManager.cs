@@ -94,5 +94,11 @@ namespace RhinoToSAP.Sync
                 }
             }
         }
+        
+        // 返回历史状态表的所有KeyValuePair，方便一次遍历
+        public static IEnumerable<KeyValuePair<Guid, object>> GetAllHistoryEntries()
+        {
+            return _historyStates;
+        }
     }
 }

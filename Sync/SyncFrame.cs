@@ -18,16 +18,13 @@ namespace RhinoToSAP.Sync
         public static bool isExploding = false;
 
 
-        //FrameSection定义
-        public static string FrameSection { get; set; } = "None";
 
         // 新增杆件：在SAP创建杆件，记录映射和历史状态
         public static void AddFrame(LineState state)
         {
             if (state == null) return;
-            if (string.IsNullOrEmpty(FrameSection)) return;
 
-            string sapId = LineHelper.CreateFrame(state, FrameSection);
+            string sapId = LineHelper.CreateFrame(state, SyncRtoS.FrameSection);
             if (string.IsNullOrEmpty(sapId)) return;
 
             SyncStateManager.AddMapping(state.RhinoLineId, sapId);
@@ -64,27 +61,6 @@ namespace RhinoToSAP.Sync
             }
         }
         //炸开多段线并添加到待处理列表
-        public static bool TryExplodePolylineAndQueue(RhinoDoc doc, RhinoObject obj)
-        {
-            // 1. 还没连接绑定图层，直接返回，不炸开任何多段线
-            if (string.IsNullOrEmpty(SAPConnector.RootLayerName)) return false;
-            // 2. 对象不在目标图层层级里，直接返回，不炸开
-            if (!LayerHelper.IsObjectInLayerHierarchy(obj, SAPConnector.RootLayerName)) return false;
-            //3.炸开多段线，获取炸开后的所有新对象ID
-            isExploding = true;
-            List<Guid> explodedIds = LineHelper.ExplodePolylineCurve(doc, obj);
-            if (explodedIds == null || explodedIds.Count == 0)
-            {
-                isExploding = false;
-                return false;
-            }
-            // 4.把所有新生成的对象ID加入待处理列表
-            foreach (Guid i in explodedIds)
-            {
-                SyncEngine.pendingChanges.Add(i);
-            }
-            isExploding = false;
-            return true;
-        }
+
     }
 }

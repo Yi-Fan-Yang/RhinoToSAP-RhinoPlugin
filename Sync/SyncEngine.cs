@@ -165,7 +165,6 @@ namespace RhinoToSAP.Sync
                 if (objs == null) continue;
                 foreach (RhinoObject obj in objs)
                 {
-                    if (SyncFrame.TryExplodePolylineAndQueue(doc, obj)) continue;
                     SyncRhinoDispatcher.AddToPendingIfValid(obj);
                 }
             }

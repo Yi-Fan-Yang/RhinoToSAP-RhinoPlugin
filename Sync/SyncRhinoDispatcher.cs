@@ -39,7 +39,6 @@ namespace RhinoToSAP.Sync
             if (SyncFrame.isExploding) return;
             try
             {
-                if (SyncFrame.TryExplodePolylineAndQueue(RhinoDoc.ActiveDoc, e.TheObject)) return;
                 AddToPendingIfValid(e.TheObject);
             }
             catch
@@ -101,7 +100,6 @@ namespace RhinoToSAP.Sync
             if (SyncFrame.isExploding) return;
             try
             {
-                if (SyncFrame.TryExplodePolylineAndQueue(RhinoDoc.ActiveDoc, e.RhinoObject)) return;
                 AddToPendingIfValid(e.RhinoObject);
             }
             catch
