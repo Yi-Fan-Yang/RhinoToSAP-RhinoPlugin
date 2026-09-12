@@ -20,8 +20,9 @@ namespace RhinoToSAP.UI
         private DropDown _layerDropDown;       // 图层下拉列表
         private CheckBox _layerLockCheckBox;   // 图层锁定复选框
         private TextBox _intervalTextBox;      // 同步间隔输入
-        private Button _connectButton;          // 连接按钮
-        private Button _disconnectButton;       // 断开按钮
+        private CheckBox _autoSyncCheckBox;      // 自动同步开关
+        private Button _connectButton;          // 启动按钮
+        private Button _disconnectButton;       // 关闭按钮
         private Label _statusLabel;             // 连接状态显示
 
         //==========映射区==========
@@ -92,6 +93,12 @@ namespace RhinoToSAP.UI
             // 同步间隔输入
             _intervalTextBox = new TextBox();
             _intervalTextBox.Text = "3";  // 默认3秒
+            _intervalTextBox.Width = 50;
+
+            // 自动同步开关
+            _autoSyncCheckBox = new CheckBox();
+            _autoSyncCheckBox.Text = "自动同步";
+            _autoSyncCheckBox.Checked = false;  // 默认关闭自动同步
 
             // 连接按钮
             _connectButton = new Button();
@@ -196,6 +203,7 @@ namespace RhinoToSAP.UI
             intervalRow.Spacing = 5;
             intervalRow.Items.Add(new Label { Text = "间隔(s)" });
             intervalRow.Items.Add(_intervalTextBox);
+            intervalRow.Items.Add(_autoSyncCheckBox);
             mainLayout.Items.Add(intervalRow);
 
             // 按钮行
@@ -289,11 +297,22 @@ namespace RhinoToSAP.UI
             {
                 _layerDropDown.Enabled = !_layerLockCheckBox.Checked.Value;
             };
-
             //同步间隔输入事件
             _intervalTextBox.TextChanged += (sender, e) =>
             {
                 string result = SyncEngine.SetSyncInterval(_intervalTextBox.Text);
+                AddLog(result);
+            };
+            // 自动同步开关
+            _autoSyncCheckBox.CheckedChanged += (sender, e) =>
+            {
+                string result = SyncEngine.SetAutoSyncEnabled(_autoSyncCheckBox.Checked.Value);
+                AddLog(result);
+            };
+            // 高亮开关
+            _highlightCheckBox.CheckedChanged += (sender, e) =>
+            {
+                string result = SyncEngine.SetHighlightEnabled(_highlightCheckBox.Checked.Value);
                 AddLog(result);
             };
             // 连接按钮点击事件
@@ -312,7 +331,6 @@ namespace RhinoToSAP.UI
                     AddLog($"连接异常：{ex.Message}");
                 }
             };
-
             //断开按钮事件
             _disconnectButton.Click += (sender, e) =>
             {

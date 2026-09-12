@@ -3,8 +3,10 @@ using Rhino;
 using Rhino.DocObjects;
 using Rhino.Geometry;
 using RhinoToSAP.Data;
+using RhinoToSAP.Sync;
 using System;
 using System.Collections.Generic;
+using static System.Windows.Forms.LinkLabel;
 
 namespace RhinoToSAP.Tools
 {
@@ -12,20 +14,31 @@ namespace RhinoToSAP.Tools
     {
         /// 坐标对比容差，和Rhino文档精度一致，误差在这个范围内不算修改
         private const double CoordinateTolerance = 1.0;
+        // 直线最新状态表：前置去重，同一ID只保留最新状态
+        private static Dictionary<Guid, LineState> _latestLineStates = new Dictionary<Guid, LineState>();
+
+
+
 
         // ----- 公共方法 -----
         //判断Geo是否是直线
         public static bool IsValidLineObject(RhinoObject obj)
         {
-            return TryGetStrictLine(obj, out _);
+            if (obj == null) return false;
+            if (!obj.Visible) return false;
+            if (!(obj.Geometry is Curve curve)) return false;
+            if (!curve.IsLinear(obj.Document.ModelAbsoluteTolerance)) return false;
+            return true; ;
         }
 
         //将RhinoObject转换为LineState
         public static LineState ToLineState(RhinoObject obj)
         {
-            if (!TryGetStrictLine(obj, out Line line)) return null;
+            if (!IsValidLineObject(obj)) return null;
             Layer layer = obj.Document.Layers[obj.Attributes.LayerIndex];
             string layerName = layer.FullPath;
+            Curve c = obj.Geometry as Curve;
+            Line line = new Line(c.PointAtStart, c.PointAtEnd);
             return new LineState(obj.Id, line, layerName);
         }
 
@@ -124,58 +137,31 @@ namespace RhinoToSAP.Tools
         }
 
         // 对比两个LineState的坐标是否一致（在容差范围内）
-        public static bool IsLineStateEqual(LineState a, LineState b)
+        public static LineChangeType GetLineChangeType(LineState a, LineState b)
         {
+            double dx1 = a.X1 - b.X1;
+            double dy1 = a.Y1 - b.Y1;
+            double dz1 = a.Z1 - b.Z1;
+            double dx2 = a.X2 - b.X2;
+            double dy2 = a.Y2 - b.Y2;
+            double dz2 = a.Z2 - b.Z2;
             if
-                    (Math.Abs(a.X1 - b.X1) < CoordinateTolerance &&
-                    Math.Abs(a.Y1 - b.Y1) < CoordinateTolerance &&
-                    Math.Abs(a.Z1 - b.Z1) < CoordinateTolerance &&
-                    Math.Abs(a.X2 - b.X2) < CoordinateTolerance &&
-                    Math.Abs(a.Y2 - b.Y2) < CoordinateTolerance &&
-                    Math.Abs(a.Z2 - b.Z2) < CoordinateTolerance)
-            {
-                return true;
-            }
-            return false;
+                (Math.Abs(dx1) < CoordinateTolerance &&
+                 Math.Abs(dx2) < CoordinateTolerance &&
+                 Math.Abs(dy1) < CoordinateTolerance &&
+                 Math.Abs(dy2) < CoordinateTolerance &&
+                 Math.Abs(dz1) < CoordinateTolerance &&
+                 Math.Abs(dz2) < CoordinateTolerance)
+            { return LineChangeType.Equal;}
+            if
+                (Math.Abs(dx1 - dx2) < CoordinateTolerance &&
+                 Math.Abs(dy1 - dy2) < CoordinateTolerance &&
+                 Math.Abs(dz1 - dz2) < CoordinateTolerance)
+            { return LineChangeType.Move;}
+            return LineChangeType.Drag;
         }
 
-        //严格提取直线对象
-        private static bool TryGetStrictLine(RhinoObject obj, out Line line)
-        {
-            line = Line.Unset;
-            if (obj == null) return false;
-            if (!obj.Visible) return false;
-            if (!(obj.Geometry is Curve curve)) return false;
-            if (!curve.IsLinear(obj.Document.ModelAbsoluteTolerance)) return false;
-            line = new Line(curve.PointAtStart,curve.PointAtEnd);
-            return true;
-        }
-
-        //炸开多段线为单独的直线对象
-        public static List<Guid> ExplodePolylineCurve(RhinoDoc doc, RhinoObject obj)
-        {
-            if(obj == null) return null;
-            if(!obj.Visible) return null;
-            if(!(obj.Geometry is PolylineCurve plc)) return null;
-            // 通过ToPolyline方法获取多段线的顶点，然后生成Line对象
-            Line[] lines = plc.ToPolyline().GetSegments();
-            // 复制原对象的属性，以便在新创建的直线对象中使用
-            ObjectAttributes attr = obj.Attributes.Duplicate();
-            // 遍历线段并赋予属性，添加到文档中
-            List<Guid> lineId = new List<Guid>();
-            foreach (Line line in lines)
-            {
-                if (line.Length < doc.ModelAbsoluteTolerance) continue;
-                Guid newId = doc.Objects.AddLine(line, attr);
-                lineId.Add(newId);
-            }
-            // 删除原多段线对象
-            doc.Objects.Delete(obj, true);
-            return lineId;
-
-
-
-
-        }
+        // 判别直线对象的变化，返回LineChangeInfo（type已确定，已去重）或null（没变化）
+        // 前置条件：obj已经确认是有效直线对象
     }
 }

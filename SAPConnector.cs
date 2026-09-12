@@ -1,11 +1,12 @@
-﻿using System;
+﻿using CSiAPIv1;
 using Rhino;
 using Rhino.DocObjects;
-using System.Runtime.InteropServices;
-using CSiAPIv1;
 using RhinoToSAP.Sync;
 using RhinoToSAP.Tools;
+using System;
 using System.Linq.Expressions;
+using System.Runtime.InteropServices;
+using System.Runtime.Remoting.Contexts;
 
 namespace RhinoToSAP
 {
@@ -45,6 +46,7 @@ namespace RhinoToSAP
         // 连接SAP：内部做所有校验、连接、单位校验、初始化，返回结果信息
         public static string Connect(string layerName, string intervalText)
         {
+            SapMessageFilter.Register();
             // ========== 1. 校验 ==========
             // 图层名校验
             if (string.IsNullOrEmpty(layerName))
@@ -258,11 +260,18 @@ namespace RhinoToSAP
         {
             try
             {
-                if(System.IO.File.Exists(ConfigFilePath))return string.Empty;
+                //RhinoApp.WriteLine("[LoadSapPath] 配置文件路径：" + ConfigFilePath);
+                //hinoApp.WriteLine("[LoadSapPath] 文件是否存在：" + System.IO.File.Exists(ConfigFilePath));
+                if (!System.IO.File.Exists(ConfigFilePath))return string.Empty;
+                //string content = System.IO.File.ReadAllText(ConfigFilePath);
+                //RhinoApp.WriteLine("[LoadSapPath] 读取到的原始内容：" + content);
+                //RhinoApp.WriteLine("[LoadSapPath] 原始内容长度：" + content.Length);
                 return System.IO.File.ReadAllText(ConfigFilePath).Trim();
+
             }
-            catch
+            catch (Exception ex)
             {
+                RhinoApp.WriteLine("[LoadSapPath] 读取异常：" + ex.Message);
                 return string.Empty;
             }
         }
@@ -272,22 +281,30 @@ namespace RhinoToSAP
         {
             try
             {
+                RhinoApp.WriteLine("[SaveSapPath] 开始保存，路径：" + path);
                 string dir = System.IO.Path.GetDirectoryName(ConfigFilePath);
+                RhinoApp.WriteLine("[SaveSapPath] 目标文件夹：" + dir);
                 if (!System.IO.Directory.Exists(dir))
                 {
                     System.IO.Directory.CreateDirectory(dir);
+                    RhinoApp.WriteLine("[SaveSapPath] 文件夹已创建");
                 }
-                System.IO.File.WriteAllText(ConfigFilePath, path.Trim());
+                System.IO.File.WriteAllText(ConfigFilePath, path);
+                RhinoApp.WriteLine("[SaveSapPath] 保存成功");
             }
-            catch
+            catch (Exception ex)
             {
-                // 吞掉异常，避免保存配置时出错
+                RhinoApp.WriteLine("[SaveSapPath] 保存失败：" + ex.Message);
             }
         }
         // 获取SAP2000.exe路径：先从配置读，没有或无效就弹窗选，选完保存
         private static string GetSapExePath()
         {
             string path = LoadSapPath();
+            RhinoApp.WriteLine("[GetSapExePath] 从配置读取的路径：" + path);
+            RhinoApp.WriteLine("[GetSapExePath] 路径长度：" + path.Length);
+            RhinoApp.WriteLine("[GetSapExePath] 文件是否存在：" + System.IO.File.Exists(path));
+
             if (System.IO.File.Exists(path) && !string.IsNullOrEmpty(path))
             {
                 return path;
@@ -308,4 +325,48 @@ namespace RhinoToSAP
             return path;
         }
     }
+
+    // OLE消息过滤器：处理SAP启动时的"服务器正在运行中"弹窗，自动重试不弹窗
+    [ComImport, Guid("00000016-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IOleMessageFilter
+    {
+        [PreserveSig]
+        int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo);
+        [PreserveSig]
+        int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType);
+        [PreserveSig]
+        int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType);
+    }
+
+    public class SapMessageFilter : IOleMessageFilter
+    {
+        public int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo)
+        {
+            return 0; // 正常处理
+        }
+
+        public int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType)
+        {
+            if (dwRejectType == 2) // 2 = SERVERCALL_RETRYLATER（服务器忙）
+            {
+                return 1000; // 1000毫秒后自动重试
+            }
+            return -1; // 其他情况取消
+        }
+
+        public int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType)
+        {
+            return 2; // 等待默认处理
+        }
+
+        // 注册消息过滤器（调用一次就行）
+        public static void Register()
+        {
+            CoRegisterMessageFilter(new SapMessageFilter(), out _);
+        }
+
+        [DllImport("Ole32.dll")]
+        private static extern int CoRegisterMessageFilter(IOleMessageFilter newFilter, out IOleMessageFilter oldFilter);
+    }
+
 }

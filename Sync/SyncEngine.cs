@@ -26,6 +26,7 @@ namespace RhinoToSAP.Sync
         private static int _connCheckCounter = 0;
         // 高亮显示管道实例
         private static HighlightAppearance _highlightConduit;
+        private static bool _autoSyncEnabled = false; // 自动同步开关，默认开启
 
         public static HashSet<Guid> pendingChanges = new HashSet<Guid>();
         
@@ -227,10 +228,13 @@ namespace RhinoToSAP.Sync
             int syncTarget = SyncInterval / 1000; // 转换为秒
             if (_syncCounter >= syncTarget)
             {
-                ProcessPendingChanges();
+                if (_autoSyncEnabled)
+                {
+                    ProcessPendingChanges();
+                }
                 _syncCounter = 0; // 重置计数器
             }
-            
+
             // 计数器2：数到5就检查SAP连接
             if (_connCheckCounter >= 5)
             {
@@ -292,7 +296,7 @@ namespace RhinoToSAP.Sync
         }
 
         // 内部统一校验：连接、映射文件、初始化都就绪才返回true
-        private static bool CheckReady(out string errorMsg)
+        public static bool CheckReady(out string errorMsg)
         {
             if (!SAPConnector.IsConnected)
             {
@@ -313,7 +317,12 @@ namespace RhinoToSAP.Sync
             return true;
         }
 
-
+        //设置自动同步开关
+        public static string SetAutoSyncEnabled(bool enabled)
+        {
+            _autoSyncEnabled = enabled;
+            return $"自动同步：{(enabled ? "开启" : "关闭")}";
+        }
         // 设置高亮显示开关
         public static string SetHighlightEnabled(bool enabled)
         {
@@ -383,6 +392,7 @@ namespace RhinoToSAP.Sync
             SyncInterval = interval * 1000;
             return $"同步间隔：{interval}秒";
         }
+
 
     }
 }

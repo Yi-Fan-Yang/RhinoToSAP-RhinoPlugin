@@ -35,4 +35,11 @@ namespace RhinoToSAP.Data
         }
         public LineState() { } // 反序列化需要无参构造函数
     }
+
+    public enum LineChangeType
+    {
+        Equal,
+        Move,
+        Drag
+    }
 }
